@@ -88,15 +88,13 @@ int main(int argc, char *argv[]){
     }
     if(numbytes == 0){
       printf("Got zero \n");
-    } else{
-      ntohl(recvCalcMsg.message);
-      ntohs(recvCalcMsg.type);
-      ntohs(recvCalcMsg.major_version);
-      ntohs(recvCalcMsg.minor_version);
-      printf("Message: %ld \n", recvCalcMsg);
+    } else if(numbytes == 12){
+        printf("NOT OK!");
+        break;
+        exit(1);
+      }else{ //Gör så detta läses rätt etc.. 
       printf("Got Message: type: %d, \nmessage: %d,\n major version: %d,\nminor version: %d ", recvCalcMsg.type,
-        recvCalcMsg.message, recvCalcMsg.major_version
-        , recvCalcMsg.minor_version);
+        recvCalcMsg.message, recvCalcMsg.major_version, recvCalcMsg.minor_version);
         if(recvCalcMsg.type == 2 && recvCalcMsg.message == 2 
           && recvCalcMsg.major_version == 1 
           && recvCalcMsg.minor_version == 0){
