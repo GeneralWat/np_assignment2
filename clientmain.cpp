@@ -55,58 +55,95 @@ int main(int argc, char *argv[]){
     freeaddrinfo(servinfo);
   }
 
-  struct calcMessage calcMsg, recvCalcMsg;
-  calcMsg.type = htons(23); //Denna ska vara 22 för att få okej
+  struct calcMessage calcMsg;
+  calcMsg.type = htons(22); //Denna ska vara 22 för att få okej
   calcMsg.message = htonl(0);
   calcMsg.protocol = htons(17);
   calcMsg.major_version = htons(1);
   calcMsg.minor_version = htons(0);
+  struct timeval timeout;
+  timeout.tv_sec = 2;
+
+
+  //setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(struct timeval));
   struct calcProtocol calcProt;
+  memset(&calcProt, 0, sizeof(calcProt));
 
   ssize_t sentbytes;
   int numbytes;
-  int timeout;
+  //setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval));
 
   while(1){
-    if(timeout == 3)
-    {
+    if((sentbytes = sendto(sockfd, &calcMsg, sizeof(calcMsg), 
+      0, p->ai_addr, p->ai_addrlen)) == -1){
       close(sockfd);
       fprintf(stderr, "Connection timeout");
       break;
       exit(1);
-    } else {
-      sentbytes = sendto(sockfd, &calcMsg, sizeof(calcMsg), 
-      0, p->ai_addr, p->ai_addrlen);
-      printf("Sent %ld bytes. \n", sentbytes);
-      timeout++;
     }
+    printf("Sending %ld bytes \n", sentbytes);
     sleep(2);
-    if((numbytes = recvfrom(sockfd, &recvCalcMsg, sizeof(recvCalcMsg), 0, 
+
+    if((numbytes = recvfrom(sockfd, &calcProt, sizeof(calcProt), 0, 
       p->ai_addr, &p->ai_addrlen)) == -1){
         perror("recvfrom");
         exit(1);
     }
+    printf("I got %d bytes \n", numbytes);
     if(numbytes == 0){
-      printf("Got zero \n");
-    } else if(numbytes == 12){
-        printf("NOT OK!");
-        break;
-        exit(1);
-      }else{ //Gör så detta läses rätt etc.. 
-      printf("Got Message: type: %d, \nmessage: %d,\n major version: %d,\nminor version: %d ", recvCalcMsg.type,
-        recvCalcMsg.message, recvCalcMsg.major_version, recvCalcMsg.minor_version);
-        if(recvCalcMsg.type == 2 && recvCalcMsg.message == 2 
-          && recvCalcMsg.major_version == 1 
-          && recvCalcMsg.minor_version == 0){
-          printf("NOT OK!");
-          break;
-          exit(1);
-        }
-      } 
-    
-    //if(numbytes = recvfrom())
+      printf("Got none \n");
+    }else if(numbytes == 12){
+      printf("NOT OK! \n");
+      close(sockfd);
+      exit(1);
+      break;
+    } else if(numbytes > 12){
+      calcProt.type =  ntohs(calcProt.type);
+      calcProt.minor_version =  ntohs(calcProt.minor_version);
+      calcProt.major_version =  ntohs(calcProt.major_version);
+      calcProt.id =  ntohl(calcProt.id);
+      calcProt.arith =  ntohl(calcProt.arith);
+      calcProt.inValue1 = ntohl(calcProt.inValue1);
+      calcProt.inValue2 = ntohl(calcProt.inValue2);
+      calcProt.inResult = ntohl(calcProt.inResult);
+      printf("Got Message: type: %d, id: %d, \narith: %d \n", 
+        calcProt.type, calcProt.id, calcProt.arith);
+      if(calcProt.arith < 5 && calcProt.arith > 0){
+        if(calcProt.arith == 1){ //add
+          printf("add %d & %d \n", calcProt.inValue1, calcProt.inValue2);
+          calcProt.inResult = calcProt.inValue1 + calcProt.inValue2;
 
+        } else if(calcProt.arith == 2){ //sub
+          printf("Sub %d & %d \n", calcProt.inValue1, calcProt.inValue2);
+          calcProt.inResult = calcProt.inValue1 - calcProt.inValue2;
+       }else if(calcProt.arith == 3){ //mul
+          printf("mul %d & %d \n", calcProt.inValue1, calcProt.inValue2);
+          calcProt.inResult = calcProt.inValue1 * calcProt.inValue2;
+        }else if(calcProt.arith == 4){ //div
+          printf("Div %d & %d \n", calcProt.inValue1, calcProt.inValue2);
+          calcProt.inResult = calcProt.inValue1 / calcProt.inValue2;
+        }
+        printf("Result = %d \n", calcProt.inResult);
+      }else if(calcProt.arith > 4 && calcProt.arith < 9){
+        if(calcProt.arith == 5){ //fadd
+
+       }else if(calcProt.arith == 6){ //fsub
+
+        }else if(calcProt.arith == 7){ //fmul
+
+        }else if(calcProt.arith == 8){ //fdiv
+
+        }
+      }else {
+        fprintf(stderr, "Error: No match of arith \n");
+        break;
+      }
+      close(sockfd);
+      break;
+      exit(1);
+    }
   }
+
   close(sockfd);
   return 0;
 
