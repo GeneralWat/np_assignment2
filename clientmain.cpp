@@ -12,8 +12,6 @@
 // Included to get the support library
 #include <calcLib.h>
 
-#define MAXDATASIZE 1000
-
 #include "protocol.h"
 
 int main(int argc, char *argv[]){
@@ -26,8 +24,11 @@ int main(int argc, char *argv[]){
   char delim[]=":";
   char *Desthost=strtok(argv[1],delim);
   char *Destport=strtok(NULL,delim);
-  /* Do magic */
-  int port = atoi(Destport);
+
+  if(Desthost == NULL || Destport == NULL){
+	  fprintf(stderr, "You must enter a IP adress and a Port");
+	  exit(1);
+  }
 
   struct addrinfo hints, *servinfo, *p;
   int rv;
@@ -35,7 +36,13 @@ int main(int argc, char *argv[]){
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_DGRAM;
   int sockfd;
+  char buf[1024];
 
+  if(inet_pton(hints.ai_family, Desthost, buf) < 1)
+	{
+		fprintf(stderr, "Not a valid IP address!");
+		exit(1);
+	}
 
   if((rv = getaddrinfo(Desthost, Destport, &hints, &servinfo)) != 0){
     fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
@@ -72,7 +79,7 @@ int main(int argc, char *argv[]){
   int numbytes;
   setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval));
 
-  for(int i = 0; i < 3; ++i){
+  while(1){
     if((sentbytes = sendto(sockfd, &calcMsg, sizeof(calcMsg), 
       0, p->ai_addr, p->ai_addrlen)) == -1){
       close(sockfd);
@@ -80,15 +87,17 @@ int main(int argc, char *argv[]){
       break;
       exit(1);
     }
+    attempts++;
     printf("Sending %ld bytes \n", sentbytes);
+    //sleep(2);
     if((numbytes = recvfrom(sockfd, &calcProt, sizeof(calcProt), 0, 
       p->ai_addr, &p->ai_addrlen)) == -1){
         perror("recvfrom");
         exit(1);
     }
-    printf("I got %d bytes \n", numbytes);
     if(numbytes == 0){
       printf("Got none \n");
+      continue;
     }else if(numbytes == 12){
       printf("NOT OK! \n");
       close(sockfd);
@@ -97,9 +106,9 @@ int main(int argc, char *argv[]){
     }else{
       break;
     }
-    if(i == 2){
-      close(sockfd);
+    if(attempts == 3){
       fprintf(stderr, "Error: Timeout \n");
+      close(sockfd);
       break;
       exit(1);
     }
