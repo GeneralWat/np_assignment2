@@ -63,15 +63,13 @@ int main(int argc, char *argv[]){
   calcMsg.minor_version = htons(0);
   struct timeval timeout;
   timeout.tv_sec = 2;
-
-
-  //setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(struct timeval));
+  
   struct calcProtocol calcProt;
   memset(&calcProt, 0, sizeof(calcProt));
 
   ssize_t sentbytes;
   int numbytes;
-  //setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval));
+  setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval));
 
   while(1){
     if((sentbytes = sendto(sockfd, &calcMsg, sizeof(calcMsg), 
@@ -97,7 +95,11 @@ int main(int argc, char *argv[]){
       close(sockfd);
       exit(1);
       break;
-    } else if(numbytes > 12){
+    }else{
+      break;
+    }
+  } 
+  if(numbytes > 12){
       calcProt.type =  ntohs(calcProt.type);
       calcProt.minor_version =  ntohs(calcProt.minor_version);
       calcProt.major_version =  ntohs(calcProt.major_version);
@@ -124,27 +126,64 @@ int main(int argc, char *argv[]){
           calcProt.inResult = calcProt.inValue1 / calcProt.inValue2;
         }
         printf("Result = %d \n", calcProt.inResult);
+        calcProt.inResult = htonl(calcProt.inResult);
+        calcProt.inValue1 = htonl(calcProt.inValue1);
+        calcProt.inValue2 = htonl(calcProt.inValue2);
       }else if(calcProt.arith > 4 && calcProt.arith < 9){
         if(calcProt.arith == 5){ //fadd
-
+          printf("fadd %8.8g & %8.8g \n", calcProt.flValue1, calcProt.flValue2);
+          calcProt.flResult = calcProt.flValue1 + calcProt.flValue2;
        }else if(calcProt.arith == 6){ //fsub
-
+          printf("fsub %8.8g & %8.8g \n", calcProt.flValue1, calcProt.flValue2);
+          calcProt.flResult = calcProt.flValue1 - calcProt.flValue2;
         }else if(calcProt.arith == 7){ //fmul
-
+          printf("fmul %8.8g & %8.8g \n", calcProt.flValue1, calcProt.flValue2);
+          calcProt.flResult = calcProt.flValue1 * calcProt.flValue2;
         }else if(calcProt.arith == 8){ //fdiv
-
+          printf("fdiv %8.8g & %8.8g \n", calcProt.flValue1, calcProt.flValue2);
+          calcProt.flResult = calcProt.flValue1 / calcProt.flValue2;
         }
+        printf("Result = %8.8g \n ", calcProt.flResult);
       }else {
         fprintf(stderr, "Error: No match of arith \n");
-        break;
+        close(sockfd);
+        exit(1);
       }
-      close(sockfd);
-      break;
-      exit(1);
+      calcProt.type = htons(2);
+      calcProt.id = htonl(calcProt.id);
+      calcProt.minor_version = htons(calcProt.minor_version);
+      calcProt.major_version = htons(calcProt.major_version);
+      calcProt.arith = htonl(calcProt.arith);
+      if((sentbytes = sendto(sockfd, &calcProt, sizeof(calcProt), 
+      0, p->ai_addr, p->ai_addrlen)) == -1){
+        close(sockfd);
+        fprintf(stderr, "Send failed");
+        exit(1);
+      }
+      sleep(1); //To make sure the respons comes back
+      if((numbytes = recvfrom(sockfd, &calcMsg, sizeof(calcMsg), 0, 
+      p->ai_addr, &p->ai_addrlen)) == -1){
+        perror("recvfrom");
+        exit(1);
+      }
+      if(numbytes == 12){
+        calcMsg.message = ntohl(calcMsg.message);
+        if(calcMsg.message == 1){
+          printf("OK! \n");
+        }
+        else if(calcMsg.message == 2){
+          printf("NOT OK! \n");
+        }
+      }else{
+        fprintf(stderr, "Error: Not expected amount of bytes \n");
+        close(1);
+        exit(1);
+      }
     }
-  }
+
 
   close(sockfd);
+  freeaddrinfo(servinfo);
   return 0;
 
 }
