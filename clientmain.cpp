@@ -63,25 +63,24 @@ int main(int argc, char *argv[]){
   calcMsg.minor_version = htons(0);
   struct timeval timeout;
   timeout.tv_sec = 2;
-  
+
   struct calcProtocol calcProt;
   memset(&calcProt, 0, sizeof(calcProt));
 
+  int attempts= 0;
   ssize_t sentbytes;
   int numbytes;
   setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval));
 
-  while(1){
+  for(int i = 0; i < 3; ++i){
     if((sentbytes = sendto(sockfd, &calcMsg, sizeof(calcMsg), 
       0, p->ai_addr, p->ai_addrlen)) == -1){
       close(sockfd);
-      fprintf(stderr, "Connection timeout");
+      fprintf(stderr, "Something went wrong when sending");
       break;
       exit(1);
     }
     printf("Sending %ld bytes \n", sentbytes);
-    sleep(2);
-
     if((numbytes = recvfrom(sockfd, &calcProt, sizeof(calcProt), 0, 
       p->ai_addr, &p->ai_addrlen)) == -1){
         perror("recvfrom");
@@ -98,6 +97,12 @@ int main(int argc, char *argv[]){
     }else{
       break;
     }
+    if(i == 2){
+      close(sockfd);
+      fprintf(stderr, "Error: Timeout \n");
+      break;
+      exit(1);
+    }
   } 
   if(numbytes > 12){
       calcProt.type =  ntohs(calcProt.type);
@@ -108,8 +113,6 @@ int main(int argc, char *argv[]){
       calcProt.inValue1 = ntohl(calcProt.inValue1);
       calcProt.inValue2 = ntohl(calcProt.inValue2);
       calcProt.inResult = ntohl(calcProt.inResult);
-      printf("Got Message: type: %d, id: %d, \narith: %d \n", 
-        calcProt.type, calcProt.id, calcProt.arith);
       if(calcProt.arith < 5 && calcProt.arith > 0){
         if(calcProt.arith == 1){ //add
           printf("add %d & %d \n", calcProt.inValue1, calcProt.inValue2);
@@ -143,7 +146,7 @@ int main(int argc, char *argv[]){
           printf("fdiv %8.8g & %8.8g \n", calcProt.flValue1, calcProt.flValue2);
           calcProt.flResult = calcProt.flValue1 / calcProt.flValue2;
         }
-        printf("Result = %8.8g \n ", calcProt.flResult);
+        printf("Result = %8.8g \n", calcProt.flResult);
       }else {
         fprintf(stderr, "Error: No match of arith \n");
         close(sockfd);
@@ -160,7 +163,6 @@ int main(int argc, char *argv[]){
         fprintf(stderr, "Send failed");
         exit(1);
       }
-      sleep(1); //To make sure the respons comes back
       if((numbytes = recvfrom(sockfd, &calcMsg, sizeof(calcMsg), 0, 
       p->ai_addr, &p->ai_addrlen)) == -1){
         perror("recvfrom");
