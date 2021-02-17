@@ -6,11 +6,14 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <errno.h>
 /* You will to add includes here */
 
 
 // Included to get the support library
 #include <calcLib.h>
+
+#define MAXDATASIZE 1024
 
 #include "protocol.h"
 
@@ -30,14 +33,13 @@ int main(int argc, char *argv[]){
 	  exit(1);
   }
 
+  char buf[MAXDATASIZE];
   struct addrinfo hints, *servinfo, *p;
   int rv;
   memset(&hints, 0, sizeof hints);
-  hints.ai_family = AF_UNSPEC;
+  hints.ai_family = AF_INET;
   hints.ai_socktype = SOCK_DGRAM;
   int sockfd;
-  char buf[1024];
-
   if(inet_pton(hints.ai_family, Desthost, buf) < 1)
 	{
 		fprintf(stderr, "Not a valid IP address!");
@@ -70,6 +72,12 @@ int main(int argc, char *argv[]){
   calcMsg.minor_version = htons(0);
   struct timeval timeout;
   timeout.tv_sec = 2;
+  timeout.tv_usec = 0;
+  if(setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout))){
+    printf("Error: Something went wrong! \n");
+    close(sockfd);
+    exit(1);
+  }
 
   struct calcProtocol calcProt;
   memset(&calcProt, 0, sizeof(calcProt));
@@ -77,7 +85,9 @@ int main(int argc, char *argv[]){
   int attempts= 0;
   ssize_t sentbytes;
   int numbytes;
-  setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval));
+
+  
+  
 
   while(1){
     if((sentbytes = sendto(sockfd, &calcMsg, sizeof(calcMsg), 
@@ -89,28 +99,28 @@ int main(int argc, char *argv[]){
     }
     attempts++;
     printf("Sending %ld bytes \n", sentbytes);
-    //sleep(2);
     if((numbytes = recvfrom(sockfd, &calcProt, sizeof(calcProt), 0, 
       p->ai_addr, &p->ai_addrlen)) == -1){
-        perror("recvfrom");
-        exit(1);
-    }
-    if(numbytes == 0){
-      printf("Got none \n");
-      continue;
+        if(errno == 11){
+          printf("Failed to send... \n");
+          if(attempts == 3){
+            fprintf(stderr, "Timeout! \n");
+            close(1);
+            exit(1);
+          }else{
+            continue;
+          }
+        }else{
+          perror("recvfrom");
+          exit(1);
+        }
     }else if(numbytes == 12){
       printf("NOT OK! \n");
       close(sockfd);
       exit(1);
       break;
-    }else{
+    }else if(numbytes > 0 && numbytes != 12){
       break;
-    }
-    if(attempts == 3){
-      fprintf(stderr, "Error: Timeout \n");
-      close(sockfd);
-      break;
-      exit(1);
     }
   } 
   if(numbytes > 12){
@@ -156,7 +166,7 @@ int main(int argc, char *argv[]){
           calcProt.flResult = calcProt.flValue1 / calcProt.flValue2;
         }
         printf("Result = %8.8g \n", calcProt.flResult);
-      }else {
+      }else{
         fprintf(stderr, "Error: No match of arith \n");
         close(sockfd);
         exit(1);
