@@ -112,6 +112,7 @@ int main(int argc, char *argv[]){
           }
         }else{
           perror("recvfrom");
+          close(1);
           exit(1);
         }
     }else if(numbytes == 12){
@@ -176,29 +177,47 @@ int main(int argc, char *argv[]){
       calcProt.minor_version = htons(calcProt.minor_version);
       calcProt.major_version = htons(calcProt.major_version);
       calcProt.arith = htonl(calcProt.arith);
-      if((sentbytes = sendto(sockfd, &calcProt, sizeof(calcProt), 
-      0, p->ai_addr, p->ai_addrlen)) == -1){
-        close(sockfd);
-        fprintf(stderr, "Send failed");
-        exit(1);
-      }
-      if((numbytes = recvfrom(sockfd, &calcMsg, sizeof(calcMsg), 0, 
-      p->ai_addr, &p->ai_addrlen)) == -1){
-        perror("recvfrom");
-        exit(1);
-      }
-      if(numbytes == 12){
-        calcMsg.message = ntohl(calcMsg.message);
-        if(calcMsg.message == 1){
-          printf("OK! \n");
+      attempts = 0;
+      while(1){
+        if((sentbytes = sendto(sockfd, &calcProt, sizeof(calcProt), 
+        0, p->ai_addr, p->ai_addrlen)) == -1){
+         close(sockfd);
+          fprintf(stderr, "Send failed");
+          exit(1);
+       }
+      
+       if((numbytes = recvfrom(sockfd, &calcMsg, sizeof(calcMsg), 0, 
+        p->ai_addr, &p->ai_addrlen)) == -1){
+          if(errno == 11){
+            printf("Failed to send... \n");
+            if(attempts == 3){
+              fprintf(stderr, "Timeout! \n");
+              close(1);
+              exit(1);
+            }else{
+              continue;
+            }
+          }else{
+            perror("recvfrom");
+            close(1);
+            exit(1);
+          }
         }
-        else if(calcMsg.message == 2){
-          printf("NOT OK! \n");
+        if(numbytes == 12){
+          calcMsg.message = ntohl(calcMsg.message);
+          if(calcMsg.message == 1){
+            printf("OK! \n");
+            break;
+         }
+          else if(calcMsg.message == 2){
+            printf("NOT OK! \n");
+            break;
+          }
+        }else{
+          fprintf(stderr, "Error: Not expected amount of bytes \n");
+          close(1);
+          exit(1);
         }
-      }else{
-        fprintf(stderr, "Error: Not expected amount of bytes \n");
-        close(1);
-        exit(1);
       }
     }
 
