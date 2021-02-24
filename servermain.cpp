@@ -31,7 +31,7 @@ struct clientInfo{
   calcProtocol assignment;
   char ip[INET6_ADDRSTRLEN];
   int port;
-  sockaddr_storage clientAddr;
+  //sockaddr_storage clientAddr;
 };
 
 
@@ -51,15 +51,115 @@ void checkJobbList(int signum){
 
 void *get_in_addr(struct sockaddr *sa)
 {
-  #ifdef DEBUG
-    printf("Get in addr\n");
-  #endif
 	if (sa->sa_family == AF_INET) {
 		return &(((struct sockaddr_in*)sa)->sin_addr);
 	}
 
 
 	return &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
+
+void createAssignment(clientInfo *client, int &nrOfClients){
+  client->assignment.id = htonl(nrOfClients);
+          client->assignment.type = htons(1);
+          client->assignment.major_version = htons(1);
+          client->assignment.minor_version = htons(0);
+          client->assignment.arith = rand()%8+1;
+          #ifdef DEBUG
+            printf("Assignment: %d \n", client->assignment.arith);
+          #endif
+
+          if(client->assignment.arith < 5 && client->assignment.arith > 0){ //Is int
+          client->assignment.inValue1 = randomInt();
+          client->assignment.inValue2 = randomInt();
+          #ifdef DEBUG
+            printf("Assignment: %d %d \n", client->assignment.inValue1, client->assignment.inValue2);
+          #endif
+          client->assignment.inValue1 = htonl(client->assignment.inValue1); //Conversaion now for debug, convert directly later
+          client->assignment.inValue2 = htonl(client->assignment.inValue2);
+          client->assignment.inResult = htonl(0);
+          client->assignment.arith = htonl(client->assignment.arith);
+          }else if(client->assignment.arith > 4 && client->assignment.arith < 9){//is float
+          client->assignment.flValue1 = randomFloat();
+          client->assignment.flValue2 = randomFloat();
+          #ifdef DEBUG
+            printf("Assignment: %f %f \n", client->assignment.flValue1, client->assignment.flValue2);
+          #endif
+          client->assignment.flValue1 = client->assignment.flValue1; //Conversaion now for debug, convert directly later
+          client->assignment.flValue2 = client->assignment.flValue2;
+          client->assignment.flResult = 0;
+          client->assignment.arith = htonl(client->assignment.arith);
+          }
+
+}
+
+void convertToCalcMsg(calcMessage &calcMsg, calcProtocol &calcProt){
+  struct calcMessage *temp = (struct calcMessage*)&calcProt;
+        calcMsg.type = ntohs(temp->type);
+        calcMsg.message = ntohl(temp->message);
+        calcMsg.protocol = ntohs(temp->protocol);
+        calcMsg.minor_version = ntohs(temp->minor_version);
+        calcMsg.major_version = ntohs(temp->major_version);
+}
+
+void intCalc(calcProtocol &calcProt, int &result){
+  if(calcProt.arith == 1){ //add
+    printf("add %d & %d \n", calcProt.inValue1, calcProt.inValue2);
+    result = calcProt.inValue1 + calcProt.inValue2;
+    } else if(calcProt.arith == 2){ //sub
+      printf("Sub %d & %d \n", calcProt.inValue1, calcProt.inValue2);
+      result = calcProt.inValue1 - calcProt.inValue2;
+    }else if(calcProt.arith == 3){ //mul
+      printf("mul %d & %d \n", calcProt.inValue1, calcProt.inValue2);
+      result = calcProt.inValue1 * calcProt.inValue2;
+    }else if(calcProt.arith == 4){ //div
+      printf("Div %d & %d \n", calcProt.inValue1, calcProt.inValue2);
+      result = calcProt.inValue1 / calcProt.inValue2;
+    }
+}
+
+void floatCalc(calcProtocol &calcProt, double &fResult){
+  if(calcProt.arith == 5){ //fadd
+    printf("fadd %8.8g & %8.8g \n", calcProt.flValue1, calcProt.flValue2);
+    fResult = calcProt.flValue1 + calcProt.flValue2;
+    }else if(calcProt.arith == 6){ //fsub
+      printf("fsub %8.8g & %8.8g \n", calcProt.flValue1, calcProt.flValue2);
+      fResult = calcProt.flValue1 - calcProt.flValue2;
+    }else if(calcProt.arith == 7){ //fmul
+      printf("fmul %8.8g & %8.8g \n", calcProt.flValue1, calcProt.flValue2);
+      fResult = calcProt.flValue1 * calcProt.flValue2;
+    }else if(calcProt.arith == 8){ //fdiv
+      printf("fdiv %8.8g & %8.8g \n", calcProt.flValue1, calcProt.flValue2);
+      fResult = calcProt.flValue1 / calcProt.flValue2;
+    }
+}
+
+void okMsg(calcMessage &calcMsg){
+  
+  calcMsg.type = htons(22); 
+  calcMsg.message = htonl(1);
+  calcMsg.protocol = htons(17);
+  calcMsg.major_version = htons(1);
+  calcMsg.minor_version = htons(0);
+
+}
+void notOkMsg(calcMessage &calcMsg){
+  calcMsg.type = htons(2); 
+  calcMsg.message = htonl(2);
+  calcMsg.protocol = htons(17);
+  calcMsg.major_version = htons(1);
+  calcMsg.minor_version = htons(0);
+
+}
+
+void calcProtToHost(calcProtocol &calcProt){
+  calcProt.arith = ntohl(calcProt.arith);
+  calcProt.inValue1 = ntohl(calcProt.inValue1);
+  //clients->assignment.arith = htonl(clients->assignment.arith);
+  calcProt.inValue2 = ntohl(calcProt.inValue2);
+  calcProt.inResult = ntohl(calcProt.inResult);
+
+
 }
 
 
@@ -102,7 +202,7 @@ int main(int argc, char *argv[]){
   hints.ai_socktype = SOCK_DGRAM;
   hints.ai_flags = AI_PASSIVE;
 
-  if((rv = getaddrinfo(NULL, Destport, &hints, &servinfo)) != 0){
+  if((rv = getaddrinfo(Desthost, Destport, &hints, &servinfo)) != 0){
     fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
     return 1;
   }
@@ -140,6 +240,7 @@ int main(int argc, char *argv[]){
   /* Regiter a callback function, associated with the SIGALRM signal, which will be raised when the alarm goes of */
   signal(SIGALRM, checkJobbList);
   setitimer(ITIMER_REAL,&alarmTime,NULL); // Start/register the alarm. 
+
   double fResult;
   int iResult;
 
@@ -153,70 +254,34 @@ int main(int argc, char *argv[]){
         perror("Recvfrom");
         continue;
       }
-      if(numbytes == 12){
+      
+      if(numbytes == sizeof(calcMessage)){
         #ifdef DEBUG
           printf("New connection!! Got bytes %d \n", numbytes);
         #endif
-        struct calcMessage *temp = (struct calcMessage*)&calcProt;
-        calcMsg.type = ntohs(temp->type);
-        calcMsg.message = ntohl(temp->message);
-        calcMsg.protocol = ntohs(temp->protocol);
-        calcMsg.minor_version = ntohs(temp->minor_version);
-        calcMsg.major_version = ntohs(temp->major_version);
+        convertToCalcMsg(calcMsg, calcProt);
+        
         if(calcMsg.type == 22 && calcMsg.message == 0 && calcMsg.protocol == 17 && calcMsg.major_version == 1 && calcMsg.minor_version == 0){ //OK!
+          clients[nrOfClients] = (clientInfo*) malloc(sizeof(clientInfo));
+          the_addr=(struct sockaddr_in*)&their_addr;
           inet_ntop(their_addr.ss_family,
 				    get_in_addr((struct sockaddr *)&their_addr),
 				    s, sizeof(s));
-          clients[nrOfClients] = (clientInfo*) malloc(sizeof(clientInfo));
-          //sprintf(s, "%s", clients[nrOfClients]->ip);
           memcpy(&clients[nrOfClients]->ip, &s, sizeof(s));
-          the_addr=(struct sockaddr_in*)&their_addr;
-          #ifdef DEBUG
-              printf("Client IP:%s \n", clients[nrOfClients]->ip);
-            #endif
-          memcpy(&clients[nrOfClients]->clientAddr, &their_addr, sizeof(their_addr));
+          //memcpy(&clients[nrOfClients]->clientAddr, &their_addr, sizeof(their_addr));
+          //printf("their Address: %s" , clients[nrOfClients]->clientAddr)
           clients[nrOfClients]->port = ntohs(the_addr->sin_port);
-          clients[nrOfClients]->assignment.id = htonl(nrOfClients);
-          clients[nrOfClients]->assignment.type = htons(1);
-          clients[nrOfClients]->assignment.major_version = htons(1);
-          clients[nrOfClients]->assignment.minor_version = htons(0);
-          clients[nrOfClients]->assignment.arith = rand()%8+1;
-          #ifdef DEBUG
-            printf("Assignment: %d \n", clients[nrOfClients]->assignment.arith);
-          #endif
-
-          if(clients[nrOfClients]->assignment.arith < 5 && clients[nrOfClients]->assignment.arith > 0){ //Is int
-          clients[nrOfClients]->assignment.inValue1 = randomInt();
-          clients[nrOfClients]->assignment.inValue2 = randomInt();
-          #ifdef DEBUG
-            printf("Assignment: %d %d \n", clients[nrOfClients]->assignment.inValue1, clients[nrOfClients]->assignment.inValue2);
-          #endif
-          clients[nrOfClients]->assignment.inValue1 = htonl(clients[nrOfClients]->assignment.inValue1); //Conversaion now for debug, convert directly later
-          clients[nrOfClients]->assignment.inValue2 = htonl(clients[nrOfClients]->assignment.inValue2);
-          clients[nrOfClients]->assignment.inResult = htonl(0);
-          clients[nrOfClients]->assignment.arith = htonl(clients[nrOfClients]->assignment.arith);
-          nrOfClients++;
-          }else if(clients[nrOfClients]->assignment.arith > 4 && clients[nrOfClients]->assignment.arith < 9){//is float
-          clients[nrOfClients]->assignment.flValue1 = randomFloat();
-          clients[nrOfClients]->assignment.flValue2 = randomFloat();
-          #ifdef DEBUG
-            printf("Assignment: %f %f \n", clients[nrOfClients]->assignment.flValue1, clients[nrOfClients]->assignment.flValue2);
-          #endif
-          clients[nrOfClients]->assignment.flValue1 = clients[nrOfClients]->assignment.flValue1; //Conversaion now for debug, convert directly later
-          clients[nrOfClients]->assignment.flValue2 = clients[nrOfClients]->assignment.flValue2;
-          clients[nrOfClients]->assignment.flResult = 0;
-          clients[nrOfClients]->assignment.arith = htonl(clients[nrOfClients]->assignment.arith);
-          nrOfClients++;
-          } else{
-          printf("Random went wrong\n");
-          continue;
-          }
-          if((numbytes = sendto(sockfd, &clients[nrOfClients-1]->assignment, sizeof(calcProtocol), 0, 
-          (struct sockaddr *)&their_addr, addr_len)) == -1){
-            fprintf(stderr, "Something went wrong when sending");
+          createAssignment(clients[nrOfClients], nrOfClients);
+          if(sendto(sockfd, &clients[nrOfClients]->assignment, sizeof(calcProtocol), 0, (struct sockaddr*)&their_addr, addr_len) == -1){
+            fprintf(stderr, "Something went wrong when sending assignment!");
+            printf("Errno:%d", errno); 
             continue;
           }
-          continue;
+            #ifdef DEBUG
+              printf("New client with IP:%s and port:%d\n", clients[nrOfClients]->ip, clients[nrOfClients]->port);
+            #endif
+            nrOfClients++;
+            continue;
         }else{ //NOT OK!!
           calcMsg.type = htons(2);
           calcMsg.message = htonl(2);
@@ -229,118 +294,62 @@ int main(int argc, char *argv[]){
          }
          continue;
         }
-      }else if(numbytes == 50){
-          #ifdef DEBUG
-            printf("Calculating results...\n");
-          #endif
-        the_addr=(struct sockaddr_in*)&their_addr;
-        inet_ntop(their_addr.ss_family,
+      }else if(numbytes == sizeof(calcProtocol)){
+            inet_ntop(their_addr.ss_family,
 				    get_in_addr((struct sockaddr *)&their_addr),
 				    s, sizeof(s));
-        for(int i = 0; i < nrOfClients; ++i){ //Check if we can find client with same ip, port and id
-          #ifdef DEBUG
-            printf("ID:%d vs ID:%d \n", ntohl(calcProt.id), ntohl(calcProt.id));
-          #endif
-          if(strcmp(s, clients[i]->ip) == 0
-          && ntohl(calcProt.id) == ntohl(clients[i]->assignment.id) && ntohs(calcProt.type) == 2){ //We got a match!!
-            //Check if calculation is correct //with a function
-            #ifdef DEBUG
-              printf("Found a match!");
-            #endif
-            calcProt.arith = ntohl(calcProt.arith);
-            calcProt.inValue1 = ntohl(calcProt.inValue1);clients[nrOfClients]->assignment.arith = htonl(clients[nrOfClients]->assignment.arith);
-            calcProt.inValue2 = ntohl(calcProt.inValue2);
-            calcProt.inResult = ntohl(calcProt.inResult);
-            if(calcProt.arith < 5 && calcProt.arith > 0){
-              if(calcProt.arith == 1){ //add
-                printf("add %d & %d \n", calcProt.inValue1, calcProt.inValue2);
-                iResult = calcProt.inValue1 + calcProt.inValue2;
-              } else if(calcProt.arith == 2){ //sub
-                printf("Sub %d & %d \n", calcProt.inValue1, calcProt.inValue2);
-                iResult = calcProt.inValue1 - calcProt.inValue2;
-              }else if(calcProt.arith == 3){ //mul
-                printf("mul %d & %d \n", calcProt.inValue1, calcProt.inValue2);
-                iResult = calcProt.inValue1 * calcProt.inValue2;
-              }else if(calcProt.arith == 4){ //div
-                printf("Div %d & %d \n", calcProt.inValue1, calcProt.inValue2);
-                iResult = calcProt.inValue1 / calcProt.inValue2;
-             }
-              printf("Result = %d \n", iResult);
-              if(iResult == calcProt.inResult){// OK!
-                calcMsg.type = htons(22); 
-                calcMsg.message = htonl(0);
-                calcMsg.protocol = htons(17);
-                calcMsg.major_version = htons(1);
-                calcMsg.minor_version = htons(0);
-                if((numbytes = sendto(sockfd, &calcMsg, sizeof(calcMsg), 0, 
-                  (struct sockaddr *)&their_addr, addr_len)) == -1){
-                  fprintf(stderr, "Something went wrong when sending");
-                 continue;
-                }
-              }else{ //Not ok!
+          for(int i = 0; i < nrOfClients; ++i){
+            if(strcmp(s, clients[i]->ip) == 0 && ntohl(clients[i]->assignment.id) == ntohl(calcProt.id)){
               #ifdef DEBUG
-                printf("NOT OK!\n");
+              printf("Found a match!\n");
               #endif
-                calcMsg.type = htons(2); 
-                calcMsg.message = htonl(2);
-                calcMsg.protocol = htons(17);
-                calcMsg.major_version = htons(1);
-                calcMsg.minor_version = htons(0);
-                if((numbytes = sendto(sockfd, &calcMsg, sizeof(calcMsg), 0, 
+              calcProtToHost(calcProt);
+              if(calcProt.arith < 5 && calcProt.arith > 0){ //if it is an int
+                intCalc(calcProt, iResult);
+                if(iResult == calcProt.inResult){// OK!
+                  #ifdef DEBUG
+                    printf("Result ok\n");
+                  #endif
+                  okMsg(calcMsg);
+               }else{ //Not ok
+                notOkMsg(calcMsg);
+                }
+                
+              }else if(calcProt.arith > 4 && calcProt.arith < 9){
+                floatCalc(calcProt, fResult);
+                double d = abs(calcProt.flResult-fResult);
+                if(d < 0.0001){ //OK!
+                  okMsg(calcMsg);
+                  #ifdef DEBUG
+                    printf("Result ok\n");
+                  #endif
+                }else{//Not Ok!!
+                  notOkMsg(calcMsg);
+                }
+                
+              }else{//ERROR
+                notOkMsg(calcMsg);
+              }
+              if((sendto(sockfd, &calcMsg, sizeof(calcMsg), 0, 
                   (struct sockaddr *)&their_addr, addr_len)) == -1){
                   fprintf(stderr, "Something went wrong when sending");
+                 break;
+                }else{
+                #ifdef DEBUG
+                    printf("Message sent!\n");
+                  #endif
                   break;
                 }
-              }
-            }else if(calcProt.arith > 4 && calcProt.arith < 9){
-            if(calcProt.arith == 5){ //fadd
-              printf("fadd %8.8g & %8.8g \n", calcProt.flValue1, calcProt.flValue2);
-              fResult = calcProt.flValue1 + calcProt.flValue2;
-            }else if(calcProt.arith == 6){ //fsub
-              printf("fsub %8.8g & %8.8g \n", calcProt.flValue1, calcProt.flValue2);
-              fResult = calcProt.flValue1 - calcProt.flValue2;
-            }else if(calcProt.arith == 7){ //fmul
-              printf("fmul %8.8g & %8.8g \n", calcProt.flValue1, calcProt.flValue2);
-              fResult = calcProt.flValue1 * calcProt.flValue2;
-            }else if(calcProt.arith == 8){ //fdiv
-              printf("fdiv %8.8g & %8.8g \n", calcProt.flValue1, calcProt.flValue2);
-              fResult = calcProt.flValue1 / calcProt.flValue2;
+                break;
             }
-             printf("Result = %8.8g \n", fResult);
-             double d = abs(calcProt.flResult-fResult);
-             if(d < 0.0001){ //OK!
-                calcMsg.type = htons(22); 
-                calcMsg.message = htonl(0);
-                calcMsg.protocol = htons(17);
-                calcMsg.major_version = htons(1);
-                calcMsg.minor_version = htons(0);
-                if((numbytes = sendto(sockfd, &calcMsg, sizeof(calcMsg), 0, 
-                  (struct sockaddr *)&their_addr, addr_len)) == -1){
-                  fprintf(stderr, "Something went wrong when sending");
-                 continue;
-                }
-             }else{
-               calcMsg.type = htons(2); 
-                calcMsg.message = htonl(2);
-                calcMsg.protocol = htons(17);
-                calcMsg.major_version = htons(1);
-                calcMsg.minor_version = htons(0);
-                if((numbytes = sendto(sockfd, &calcMsg, sizeof(calcMsg), 0, 
-                  (struct sockaddr *)&their_addr, addr_len)) == -1){
-                  fprintf(stderr, "Something went wrong when sending");
-                  continue;
-                }
-             }
-            }else{
-              fprintf(stderr, "Error: No match of arith \n");
-              continue;
-            }
-          }else{
-            #ifdef DEBUG
-              printf("I think your for loop is broken\n");
-            #endif
+          }//FOr loop end
+          notOkMsg(calcMsg);
+          if((sendto(sockfd, &calcMsg, sizeof(calcMsg), 0, 
+            (struct sockaddr *)&their_addr, addr_len)) == -1){
+            fprintf(stderr, "Something went wrong when sending");
+            break;
           }
-        }
+          continue;
       }else{
         fprintf(stderr, "Unexpected amount of bytes \n");
         continue;
