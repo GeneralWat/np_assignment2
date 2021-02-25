@@ -9,6 +9,7 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <time.h>
 
 /* You will to add includes here */
 
@@ -23,21 +24,50 @@
 
 
 using namespace std;
-/* Needs to be global, to be rechable by callback and main */
-int loopCount=0;
-int terminate=0;
+
+
 
 struct clientInfo{
   calcProtocol assignment;
   char ip[INET6_ADDRSTRLEN];
   int port;
+  time_t start;
   //sockaddr_storage clientAddr;
 };
+
+
+/* Needs to be global, to be rechable by callback and main */
+int loopCount=0;
+int terminate=0;
+clientInfo * clients[50] = {nullptr};
+int nrOfClients = 0;
+
+bool checkClientsTime(clientInfo &client, time_t end){
+  int sec = (end - client.start); 
+  bool result = false;
+  if(sec >= 10){//Have they existed for over 10 sec
+    result = true;
+  }
+  return result;
+}
+
 
 
 /* Call back function, will be called when the SIGALRM is raised when the timer expires. */
 void checkJobbList(int signum){
   // As anybody can call the handler, its good coding to check the signal number that called it.
+  time_t end = time(NULL);
+  for(int i = 0; i < nrOfClients; ++i){
+    printf("Looking for lost clients\n");
+    if(checkClientsTime(*clients[i], end)){
+      if(nrOfClients > 0 && clients[i] != nullptr){ //Make sure this does not crash
+      clients[i] = clients[nrOfClients - 1];
+      free(clients[nrOfClients - 1]);
+      printf("Client %d removed !\n", i);
+      nrOfClients--;
+      }
+    }
+  }
 
   printf("Let me be, I want to sleep.\n");
 
@@ -59,8 +89,11 @@ void *get_in_addr(struct sockaddr *sa)
 	return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-void createAssignment(clientInfo *client, int &nrOfClients){
-  client->assignment.id = htonl(nrOfClients);
+
+
+void createAssignment(clientInfo *client, int &idVal){
+  idVal++;
+  client->assignment.id = htonl(idVal);
           client->assignment.type = htons(1);
           client->assignment.major_version = htons(1);
           client->assignment.minor_version = htons(0);
@@ -78,6 +111,9 @@ void createAssignment(clientInfo *client, int &nrOfClients){
           client->assignment.inValue1 = htonl(client->assignment.inValue1); //Conversaion now for debug, convert directly later
           client->assignment.inValue2 = htonl(client->assignment.inValue2);
           client->assignment.inResult = htonl(0);
+          client->assignment.flResult = 0;
+          client->assignment.flValue1 = 0;
+          client->assignment.flValue2 = 0;
           client->assignment.arith = htonl(client->assignment.arith);
           }else if(client->assignment.arith > 4 && client->assignment.arith < 9){//is float
           client->assignment.flValue1 = randomFloat();
@@ -88,6 +124,9 @@ void createAssignment(clientInfo *client, int &nrOfClients){
           client->assignment.flValue1 = client->assignment.flValue1; //Conversaion now for debug, convert directly later
           client->assignment.flValue2 = client->assignment.flValue2;
           client->assignment.flResult = 0;
+          client->assignment.inValue1 = htonl(0); //Conversaion now for debug, convert directly later
+          client->assignment.inValue2 = htonl(0);
+          client->assignment.inResult = htonl(0);
           client->assignment.arith = htonl(client->assignment.arith);
           }
 
@@ -193,8 +232,7 @@ int main(int argc, char *argv[]){
 
 
   char s[INET6_ADDRSTRLEN];
-  clientInfo * clients[] = {nullptr};
-  int nrOfClients = 0;
+  int idVal = 70;
   initCalcLib();
 
   memset(&hints, 0, sizeof(hints));
@@ -238,9 +276,8 @@ int main(int argc, char *argv[]){
   alarmTime.it_value.tv_usec=10;
 
   /* Regiter a callback function, associated with the SIGALRM signal, which will be raised when the alarm goes of */
-  signal(SIGALRM, checkJobbList);
-  setitimer(ITIMER_REAL,&alarmTime,NULL); // Start/register the alarm. 
-
+  signal(SIGALRM, checkJobbList); // Start/register the alarm. 
+  setitimer(ITIMER_REAL,&alarmTime,NULL);
   double fResult;
   int iResult;
 
@@ -248,40 +285,29 @@ int main(int argc, char *argv[]){
   
   while(terminate==0){
     printf("This is the main loop, %d time.\n",loopCount);
-    addr_len = sizeof their_addr;
+    addr_len = sizeof(their_addr);
+    memset(&their_addr, 0, sizeof(their_addr));
     if((numbytes = recvfrom(sockfd, &calcProt, sizeof(calcProt), 0, 
       (struct sockaddr *)&their_addr, &addr_len)) == -1){
         perror("Recvfrom");
-        continue;
       }
-      
-      if(numbytes == sizeof(calcMessage)){
-        #ifdef DEBUG
-          printf("New connection!! Got bytes %d \n", numbytes);
-        #endif
+      the_addr=(struct sockaddr_in*)&their_addr;
+      inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof(s));
+      printf("their Address: %s: %d (%d) %d numbytes =%d Start\n" , s, ntohs(the_addr->sin_port), sockfd, their_addr.ss_family, numbytes);
+      if(numbytes == sizeof(calcMessage)){  
         convertToCalcMsg(calcMsg, calcProt);
-        
         if(calcMsg.type == 22 && calcMsg.message == 0 && calcMsg.protocol == 17 && calcMsg.major_version == 1 && calcMsg.minor_version == 0){ //OK!
-          clients[nrOfClients] = (clientInfo*) malloc(sizeof(clientInfo));
-          the_addr=(struct sockaddr_in*)&their_addr;
-          inet_ntop(their_addr.ss_family,
-				    get_in_addr((struct sockaddr *)&their_addr),
-				    s, sizeof(s));
+          clients[nrOfClients] = (clientInfo*) malloc(sizeof(clientInfo)); //Problemet var med allokering av minnet. 
           memcpy(&clients[nrOfClients]->ip, &s, sizeof(s));
-          //memcpy(&clients[nrOfClients]->clientAddr, &their_addr, sizeof(their_addr));
-          //printf("their Address: %s" , clients[nrOfClients]->clientAddr)
           clients[nrOfClients]->port = ntohs(the_addr->sin_port);
-          createAssignment(clients[nrOfClients], nrOfClients);
-          if(sendto(sockfd, &clients[nrOfClients]->assignment, sizeof(calcProtocol), 0, (struct sockaddr*)&their_addr, addr_len) == -1){
-            fprintf(stderr, "Something went wrong when sending assignment!");
-            printf("Errno:%d", errno); 
-            continue;
+          createAssignment(clients[nrOfClients], idVal);
+          clients[nrOfClients]->start = time(NULL);
+          nrOfClients++;
+
+          if(sendto(sockfd, &clients[nrOfClients - 1]->assignment, sizeof(calcProtocol), 0, (struct sockaddr*)&their_addr, addr_len) == -1){
+            fprintf(stderr, "Something went wrong when sending assignment!\n");
+            printf("Errno:%d %s", errno, strerror(errno)); 
           }
-            #ifdef DEBUG
-              printf("New client with IP:%s and port:%d\n", clients[nrOfClients]->ip, clients[nrOfClients]->port);
-            #endif
-            nrOfClients++;
-            continue;
         }else{ //NOT OK!!
           calcMsg.type = htons(2);
           calcMsg.message = htonl(2);
@@ -289,27 +315,17 @@ int main(int argc, char *argv[]){
           calcMsg.minor_version = htons(0);
          if((numbytes = sendto(sockfd, &calcMsg, sizeof(calcMsg), 0,
          (struct sockaddr*)&their_addr, addr_len)) == -1){
-            fprintf(stderr, "Something went wrong when sending");
-            continue;
+            fprintf(stderr, "Something went wrong when sending\n");
          }
-         continue;
         }
       }else if(numbytes == sizeof(calcProtocol)){
-            inet_ntop(their_addr.ss_family,
-				    get_in_addr((struct sockaddr *)&their_addr),
-				    s, sizeof(s));
+            inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof(s));
           for(int i = 0; i < nrOfClients; ++i){
             if(strcmp(s, clients[i]->ip) == 0 && ntohl(clients[i]->assignment.id) == ntohl(calcProt.id)){
-              #ifdef DEBUG
-              printf("Found a match!\n");
-              #endif
               calcProtToHost(calcProt);
               if(calcProt.arith < 5 && calcProt.arith > 0){ //if it is an int
                 intCalc(calcProt, iResult);
                 if(iResult == calcProt.inResult){// OK!
-                  #ifdef DEBUG
-                    printf("Result ok\n");
-                  #endif
                   okMsg(calcMsg);
                }else{ //Not ok
                 notOkMsg(calcMsg);
@@ -320,42 +336,28 @@ int main(int argc, char *argv[]){
                 double d = abs(calcProt.flResult-fResult);
                 if(d < 0.0001){ //OK!
                   okMsg(calcMsg);
-                  #ifdef DEBUG
-                    printf("Result ok\n");
-                  #endif
                 }else{//Not Ok!!
                   notOkMsg(calcMsg);
                 }
-                
-              }else{//ERROR
-                notOkMsg(calcMsg);
               }
               if((sendto(sockfd, &calcMsg, sizeof(calcMsg), 0, 
                   (struct sockaddr *)&their_addr, addr_len)) == -1){
-                  fprintf(stderr, "Something went wrong when sending");
+                  fprintf(stderr, "Something went wrong when sending\n");
                  break;
-                }else{
-                #ifdef DEBUG
-                    printf("Message sent!\n");
-                  #endif
-                  break;
                 }
+                clients[i]->start = time(NULL); //Restart timer
                 break;
             }
           }//FOr loop end
-          notOkMsg(calcMsg);
+          notOkMsg(calcMsg); //if it can go through the for loop it wasnt an accaptable client
           if((sendto(sockfd, &calcMsg, sizeof(calcMsg), 0, 
             (struct sockaddr *)&their_addr, addr_len)) == -1){
-            fprintf(stderr, "Something went wrong when sending");
+            fprintf(stderr, "Something went wrong when sending\n");
             break;
           }
-          continue;
       }else{
         fprintf(stderr, "Unexpected amount of bytes \n");
-        continue;
       }
-      /*sleep(1);
-      loopCount++;*/
   }
   printf("done.\n");
   for(int i = 0; i < nrOfClients; ++i){
